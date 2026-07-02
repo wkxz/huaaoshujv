@@ -16,7 +16,8 @@ func main() {
 		fmt.Printf("  - [%s] %s (%s %s, 间隔%ds)\n", t.ID, t.Name, t.Method, t.URL, t.IntervalSeconds)
 	}
 
-	scheduler := NewScheduler()
+	store := NewStore("data.json")
+	scheduler := NewScheduler(store)
 	scheduler.Start(cfg.Targets)
 
 	mux := http.NewServeMux()
