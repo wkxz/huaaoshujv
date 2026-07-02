@@ -55,15 +55,17 @@ type Scheduler struct {
 	stopChs  map[string]chan struct{}
 	resultCh chan ProbeResult
 	store    *Store
+	alertMgr *AlertManager
 	mu       sync.Mutex
 }
 
-func NewScheduler(store *Store) *Scheduler {
+func NewScheduler(store *Store, alertMgr *AlertManager) *Scheduler {
 	return &Scheduler{
 		targets:  make(map[string]Target),
 		stopChs:  make(map[string]chan struct{}),
 		resultCh: make(chan ProbeResult, 100),
 		store:    store,
+		alertMgr: alertMgr,
 	}
 }
 
@@ -119,6 +121,7 @@ func (s *Scheduler) runProbe(t Target, stopCh chan struct{}) {
 func (s *Scheduler) processResults() {
 	for result := range s.resultCh {
 		s.store.SaveResult(result)
+		s.alertMgr.Check(result)
 
 		status := "✓"
 		if !result.Success {

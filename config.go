@@ -17,7 +17,14 @@ type Target struct {
 }
 
 type Config struct {
-	Targets []Target `json:"targets"`
+	Targets         []Target    `json:"targets"`
+	Alert           AlertConfig `json:"alert"`
+}
+
+type AlertConfig struct {
+	WebhookURL      string `json:"webhook_url"`
+	Threshold       int    `json:"threshold"`
+	CooldownMinutes int    `json:"cooldown_minutes"`
 }
 
 func LoadConfig(path string) (*Config, error) {

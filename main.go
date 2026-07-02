@@ -17,7 +17,18 @@ func main() {
 	}
 
 	store := NewStore("data.json")
-	scheduler := NewScheduler(store)
+
+	threshold := cfg.Alert.Threshold
+	if threshold <= 0 {
+		threshold = 3
+	}
+	cooldown := cfg.Alert.CooldownMinutes
+	if cooldown <= 0 {
+		cooldown = 5
+	}
+	alertMgr := NewAlertManager(cfg.Alert.WebhookURL, threshold, cooldown)
+
+	scheduler := NewScheduler(store, alertMgr)
 	scheduler.Start(cfg.Targets)
 
 	mux := http.NewServeMux()

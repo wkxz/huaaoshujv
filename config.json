@@ -27,5 +27,10 @@
         "Accept": "application/json"
       }
     }
-  ]
+  ],
+  "alert": {
+    "webhook_url": "",
+    "threshold": 3,
+    "cooldown_minutes": 5
+  }
 }
