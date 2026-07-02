@@ -277,8 +277,20 @@ func (a *API) createBenchTask(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url is required"})
 		return
 	}
+	if !strings.HasPrefix(cfg.URL, "http://") && !strings.HasPrefix(cfg.URL, "https://") {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url must start with http:// or https://"})
+		return
+	}
 	if cfg.DurationSeconds <= 0 && cfg.TotalRequests <= 0 {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "duration_seconds or total_requests is required"})
+		return
+	}
+	if cfg.Concurrency > 500 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "concurrency must be <= 500"})
+		return
+	}
+	if cfg.DurationSeconds > 300 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "duration_seconds must be <= 300"})
 		return
 	}
 

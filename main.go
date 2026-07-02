@@ -1,9 +1,15 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
 )
 
 func main() {
@@ -41,7 +47,38 @@ func main() {
 		w.Write([]byte(`{"status":"ok"}`))
 	})
 
+	handler := loggingMiddleware(mux)
+
 	addr := ":8080"
-	fmt.Printf("HTTP Monitor started on %s\n", addr)
-	log.Fatal(http.ListenAndServe(addr, mux))
+	server := &http.Server{Addr: addr, Handler: handler}
+
+	go func() {
+		fmt.Printf("HTTP Monitor started on %s\n", addr)
+		if err := server.ListenAndServe(); err != http.ErrServerClosed {
+			log.Fatalf("HTTP server error: %v", err)
+		}
+	}()
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	<-quit
+
+	fmt.Println("\n正在关闭服务...")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	server.Shutdown(ctx)
+	store.ForceSync()
+	fmt.Println("服务已关闭")
+}
+
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, "/api/") || r.URL.Path == "/health" {
+			start := time.Now()
+			next.ServeHTTP(w, r)
+			log.Printf("%s %s %v", r.Method, r.URL.Path, time.Since(start))
+		} else {
+			next.ServeHTTP(w, r)
+		}
+	})
 }

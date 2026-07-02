@@ -89,3 +89,7 @@ func (s *Store) load() {
 	}
 	json.Unmarshal(data, &s.results)
 }
+
+func (s *Store) ForceSync() {
+	s.persist()
+}
