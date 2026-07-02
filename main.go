@@ -16,6 +16,9 @@ func main() {
 		fmt.Printf("  - [%s] %s (%s %s, 间隔%ds)\n", t.ID, t.Name, t.Method, t.URL, t.IntervalSeconds)
 	}
 
+	scheduler := NewScheduler()
+	scheduler.Start(cfg.Targets)
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
