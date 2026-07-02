@@ -7,6 +7,15 @@ import (
 )
 
 func main() {
+	cfg, err := LoadConfig("config.json")
+	if err != nil {
+		log.Fatalf("加载配置失败: %v", err)
+	}
+	fmt.Printf("已加载 %d 个监控目标:\n", len(cfg.Targets))
+	for _, t := range cfg.Targets {
+		fmt.Printf("  - [%s] %s (%s %s, 间隔%ds)\n", t.ID, t.Name, t.Method, t.URL, t.IntervalSeconds)
+	}
+
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {

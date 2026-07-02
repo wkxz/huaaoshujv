@@ -1,0 +1,31 @@
+{
+  "targets": [
+    {
+      "id": "baidu",
+      "name": "百度",
+      "url": "https://www.baidu.com",
+      "method": "GET",
+      "interval_seconds": 30,
+      "timeout_seconds": 10
+    },
+    {
+      "id": "httpbin",
+      "name": "HTTPBin",
+      "url": "https://httpbin.org/get",
+      "method": "GET",
+      "interval_seconds": 60,
+      "timeout_seconds": 15
+    },
+    {
+      "id": "github-api",
+      "name": "GitHub API",
+      "url": "https://api.github.com",
+      "method": "GET",
+      "interval_seconds": 45,
+      "timeout_seconds": 10,
+      "headers": {
+        "Accept": "application/json"
+      }
+    }
+  ]
+}
