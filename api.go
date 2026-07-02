@@ -2,26 +2,47 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 )
 
 type API struct {
-	store     *Store
-	scheduler *Scheduler
-	cfg       *Config
-	mu        sync.Mutex
+	store      *Store
+	scheduler  *Scheduler
+	cfg        *Config
+	mu         sync.Mutex
+	benchTasks map[string]*BenchTask
+	benchMu    sync.Mutex
+}
+
+type BenchTask struct {
+	ID        string       `json:"id"`
+	Config    BenchConfig  `json:"config"`
+	Status    string       `json:"status"`
+	Report    *BenchReport `json:"report,omitempty"`
+	StartedAt time.Time   `json:"started_at"`
+	EndedAt   *time.Time  `json:"ended_at,omitempty"`
+	Error     string       `json:"error,omitempty"`
 }
 
 func NewAPI(store *Store, scheduler *Scheduler, cfg *Config) *API {
-	return &API{store: store, scheduler: scheduler, cfg: cfg}
+	return &API{
+		store:      store,
+		scheduler:  scheduler,
+		cfg:        cfg,
+		benchTasks: make(map[string]*BenchTask),
+	}
 }
 
 func (a *API) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/status", a.handleStatus)
 	mux.HandleFunc("/api/targets", a.handleTargets)
 	mux.HandleFunc("/api/targets/", a.handleTargetByID)
+	mux.HandleFunc("/api/bench", a.handleBenchList)
+	mux.HandleFunc("/api/bench/", a.handleBenchByID)
 }
 
 func (a *API) handleStatus(w http.ResponseWriter, r *http.Request) {
@@ -222,6 +243,93 @@ func (a *API) deleteTarget(w http.ResponseWriter, r *http.Request, id string) {
 		}
 	}
 	writeJSON(w, http.StatusNotFound, map[string]string{"error": "target not found"})
+}
+
+func (a *API) handleBenchList(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		a.listBenchTasks(w, r)
+	case http.MethodPost:
+		a.createBenchTask(w, r)
+	default:
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+	}
+}
+
+func (a *API) listBenchTasks(w http.ResponseWriter, r *http.Request) {
+	a.benchMu.Lock()
+	defer a.benchMu.Unlock()
+
+	tasks := make([]*BenchTask, 0, len(a.benchTasks))
+	for _, t := range a.benchTasks {
+		tasks = append(tasks, t)
+	}
+	writeJSON(w, http.StatusOK, tasks)
+}
+
+func (a *API) createBenchTask(w http.ResponseWriter, r *http.Request) {
+	var cfg BenchConfig
+	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
+		return
+	}
+	if cfg.URL == "" {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "url is required"})
+		return
+	}
+	if cfg.DurationSeconds <= 0 && cfg.TotalRequests <= 0 {
+		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "duration_seconds or total_requests is required"})
+		return
+	}
+
+	taskID := fmt.Sprintf("bench-%d", time.Now().UnixMilli())
+	task := &BenchTask{
+		ID:        taskID,
+		Config:    cfg,
+		Status:    "running",
+		StartedAt: time.Now(),
+	}
+
+	a.benchMu.Lock()
+	a.benchTasks[taskID] = task
+	a.benchMu.Unlock()
+
+	go func() {
+		start := time.Now()
+		records := RunBench(cfg)
+		duration := time.Since(start)
+
+		report := CalcReport(records, duration)
+		now := time.Now()
+
+		a.benchMu.Lock()
+		task.Status = "completed"
+		task.Report = &report
+		task.EndedAt = &now
+		a.benchMu.Unlock()
+	}()
+
+	writeJSON(w, http.StatusCreated, task)
+}
+
+func (a *API) handleBenchByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		writeJSON(w, http.StatusMethodNotAllowed, map[string]string{"error": "method not allowed"})
+		return
+	}
+
+	id := strings.TrimPrefix(r.URL.Path, "/api/bench/")
+
+	a.benchMu.Lock()
+	task, ok := a.benchTasks[id]
+	a.benchMu.Unlock()
+
+	if !ok {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "bench task not found"})
+		return
+	}
+
+	writeJSON(w, http.StatusOK, task)
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {
