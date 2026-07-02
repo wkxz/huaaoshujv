@@ -2,6 +2,7 @@ package main
 
 import (
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 )
@@ -117,4 +118,73 @@ func sendRequest(client *http.Client, cfg BenchConfig) BenchRecord {
 		Latency:    latency,
 		LatencyMs:  float64(latency.Microseconds()) / 1000.0,
 	}
+}
+
+type BenchReport struct {
+	TotalRequests  int                `json:"total_requests"`
+	SuccessCount   int                `json:"success_count"`
+	FailCount      int                `json:"fail_count"`
+	QPS            float64            `json:"qps"`
+	AvgLatencyMs   float64            `json:"avg_latency_ms"`
+	MinLatencyMs   float64            `json:"min_latency_ms"`
+	MaxLatencyMs   float64            `json:"max_latency_ms"`
+	P50LatencyMs   float64            `json:"p50_latency_ms"`
+	P95LatencyMs   float64            `json:"p95_latency_ms"`
+	P99LatencyMs   float64            `json:"p99_latency_ms"`
+	StatusCodeDist map[int]int        `json:"status_code_dist"`
+	DurationMs     float64            `json:"duration_ms"`
+}
+
+func CalcReport(records []BenchRecord, duration time.Duration) BenchReport {
+	report := BenchReport{
+		TotalRequests:  len(records),
+		StatusCodeDist: make(map[int]int),
+		DurationMs:     float64(duration.Milliseconds()),
+	}
+
+	if len(records) == 0 {
+		return report
+	}
+
+	var latencies []float64
+	var totalLatency float64
+
+	for _, r := range records {
+		if r.Error == "" && r.StatusCode >= 200 && r.StatusCode < 300 {
+			report.SuccessCount++
+		} else {
+			report.FailCount++
+		}
+		if r.StatusCode > 0 {
+			report.StatusCodeDist[r.StatusCode]++
+		}
+		latencies = append(latencies, r.LatencyMs)
+		totalLatency += r.LatencyMs
+	}
+
+	report.AvgLatencyMs = totalLatency / float64(len(records))
+
+	if duration.Seconds() > 0 {
+		report.QPS = float64(len(records)) / duration.Seconds()
+	}
+
+	sort.Float64s(latencies)
+	report.MinLatencyMs = latencies[0]
+	report.MaxLatencyMs = latencies[len(latencies)-1]
+	report.P50LatencyMs = percentile(latencies, 50)
+	report.P95LatencyMs = percentile(latencies, 95)
+	report.P99LatencyMs = percentile(latencies, 99)
+
+	return report
+}
+
+func percentile(sorted []float64, p int) float64 {
+	if len(sorted) == 0 {
+		return 0
+	}
+	idx := (p * len(sorted)) / 100
+	if idx >= len(sorted) {
+		idx = len(sorted) - 1
+	}
+	return sorted[idx]
 }
