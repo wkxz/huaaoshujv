@@ -31,11 +31,16 @@ func RunBench(cfg BenchConfig) []BenchRecord {
 		cfg.Concurrency = 10
 	}
 
-	var records []BenchRecord
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-
-	client := &http.Client{Timeout: 30 * time.Second}
+	transport := &http.Transport{
+		MaxIdleConns:        cfg.Concurrency * 2,
+		MaxIdleConnsPerHost: cfg.Concurrency * 2,
+		MaxConnsPerHost:     cfg.Concurrency * 2,
+		IdleConnTimeout:     90 * time.Second,
+	}
+	client := &http.Client{
+		Timeout:   30 * time.Second,
+		Transport: transport,
+	}
 
 	done := make(chan struct{})
 	if cfg.DurationSeconds > 0 {
@@ -45,7 +50,8 @@ func RunBench(cfg BenchConfig) []BenchRecord {
 		}()
 	}
 
-	requestCount := make(chan struct{}, cfg.Concurrency)
+	resultCh := make(chan BenchRecord, cfg.Concurrency*2)
+	var wg sync.WaitGroup
 	totalSent := 0
 	var countMu sync.Mutex
 
@@ -74,20 +80,24 @@ func RunBench(cfg BenchConfig) []BenchRecord {
 				if shouldStop() {
 					return
 				}
-				requestCount <- struct{}{}
-
-				record := sendRequest(client, cfg)
-
-				mu.Lock()
-				records = append(records, record)
-				mu.Unlock()
-
-				<-requestCount
+				resultCh <- sendRequest(client, cfg)
 			}
 		}()
 	}
 
+	var records []BenchRecord
+	collectDone := make(chan struct{})
+	go func() {
+		for r := range resultCh {
+			records = append(records, r)
+		}
+		close(collectDone)
+	}()
+
 	wg.Wait()
+	close(resultCh)
+	<-collectDone
+
 	return records
 }
 
@@ -121,18 +131,18 @@ func sendRequest(client *http.Client, cfg BenchConfig) BenchRecord {
 }
 
 type BenchReport struct {
-	TotalRequests  int                `json:"total_requests"`
-	SuccessCount   int                `json:"success_count"`
-	FailCount      int                `json:"fail_count"`
-	QPS            float64            `json:"qps"`
-	AvgLatencyMs   float64            `json:"avg_latency_ms"`
-	MinLatencyMs   float64            `json:"min_latency_ms"`
-	MaxLatencyMs   float64            `json:"max_latency_ms"`
-	P50LatencyMs   float64            `json:"p50_latency_ms"`
-	P95LatencyMs   float64            `json:"p95_latency_ms"`
-	P99LatencyMs   float64            `json:"p99_latency_ms"`
-	StatusCodeDist map[int]int        `json:"status_code_dist"`
-	DurationMs     float64            `json:"duration_ms"`
+	TotalRequests  int         `json:"total_requests"`
+	SuccessCount   int         `json:"success_count"`
+	FailCount      int         `json:"fail_count"`
+	QPS            float64     `json:"qps"`
+	AvgLatencyMs   float64     `json:"avg_latency_ms"`
+	MinLatencyMs   float64     `json:"min_latency_ms"`
+	MaxLatencyMs   float64     `json:"max_latency_ms"`
+	P50LatencyMs   float64     `json:"p50_latency_ms"`
+	P95LatencyMs   float64     `json:"p95_latency_ms"`
+	P99LatencyMs   float64     `json:"p99_latency_ms"`
+	StatusCodeDist map[int]int `json:"status_code_dist"`
+	DurationMs     float64     `json:"duration_ms"`
 }
 
 func CalcReport(records []BenchRecord, duration time.Duration) BenchReport {
