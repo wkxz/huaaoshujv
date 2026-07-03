@@ -4,10 +4,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"strings"
 	"sync"
 	"time"
 )
+
+const maxBenchTasks = 100
 
 type API struct {
 	store      *Store
@@ -264,6 +267,9 @@ func (a *API) listBenchTasks(w http.ResponseWriter, r *http.Request) {
 	for _, t := range a.benchTasks {
 		tasks = append(tasks, t)
 	}
+	sort.Slice(tasks, func(i, j int) bool {
+		return tasks[i].StartedAt.After(tasks[j].StartedAt)
+	})
 	writeJSON(w, http.StatusOK, tasks)
 }
 
@@ -303,6 +309,9 @@ func (a *API) createBenchTask(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.benchMu.Lock()
+	if len(a.benchTasks) >= maxBenchTasks {
+		a.evictOldestBenchTask()
+	}
 	a.benchTasks[taskID] = task
 	a.benchMu.Unlock()
 
@@ -342,6 +351,24 @@ func (a *API) handleBenchByID(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, task)
+}
+
+// evictOldestBenchTask removes the oldest completed task; caller holds benchMu
+func (a *API) evictOldestBenchTask() {
+	var oldestID string
+	var oldestTime time.Time
+	for id, t := range a.benchTasks {
+		if t.Status != "completed" {
+			continue
+		}
+		if oldestID == "" || t.StartedAt.Before(oldestTime) {
+			oldestID = id
+			oldestTime = t.StartedAt
+		}
+	}
+	if oldestID != "" {
+		delete(a.benchTasks, oldestID)
+	}
 }
 
 func writeJSON(w http.ResponseWriter, status int, data interface{}) {

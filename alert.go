@@ -91,5 +91,12 @@ func (am *AlertManager) send(payload WebhookPayload) {
 		return
 	}
 	data, _ := json.Marshal(payload)
-	go http.Post(am.webhookURL, "application/json", bytes.NewReader(data))
+	go func() {
+		resp, err := http.Post(am.webhookURL, "application/json", bytes.NewReader(data))
+		if err != nil {
+			fmt.Printf("[ALERT] webhook发送失败: %v\n", err)
+			return
+		}
+		resp.Body.Close()
+	}()
 }
