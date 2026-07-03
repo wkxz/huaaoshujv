@@ -12,10 +12,11 @@ import (
 const maxResultsPerTarget = 100
 
 type Store struct {
-	mu      sync.RWMutex
-	results map[string][]config.ProbeResult
-	path    string
-	saveCh  chan struct{}
+	mu       sync.RWMutex
+	results  map[string][]config.ProbeResult
+	path     string
+	saveCh   chan struct{}
+	writeMu  sync.Mutex
 }
 
 func NewStore(path string) *Store {
@@ -102,6 +103,8 @@ func (s *Store) persist() {
 	if err != nil {
 		return
 	}
+	s.writeMu.Lock()
+	defer s.writeMu.Unlock()
 	tmp := s.path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0644); err != nil {
 		return

@@ -22,7 +22,7 @@ type API struct {
 	scheduler  *monitor.Scheduler
 	cfg        *config.Config
 	cfgPath    string
-	mu         sync.Mutex
+	mu         sync.RWMutex
 	benchTasks map[string]*BenchTask
 	benchMu    sync.Mutex
 }
@@ -61,8 +61,11 @@ func (a *API) handleStatus(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	latest := a.store.GetAllLatest()
+	a.mu.RLock()
 	total := len(a.cfg.Targets)
+	a.mu.RUnlock()
+
+	latest := a.store.GetAllLatest()
 	healthy := 0
 	for _, r := range latest {
 		if r.Success {
@@ -96,11 +99,13 @@ func (a *API) listTargets(w http.ResponseWriter, r *http.Request) {
 		Latest *config.ProbeResult `json:"latest_probe"`
 	}
 
+	a.mu.RLock()
 	var result []TargetStatus
 	for _, t := range a.cfg.Targets {
 		ts := TargetStatus{Target: t, Latest: latest[t.ID]}
 		result = append(result, ts)
 	}
+	a.mu.RUnlock()
 
 	writeJSON(w, http.StatusOK, result)
 }
@@ -136,17 +141,25 @@ func (a *API) handleTargetDetail(w http.ResponseWriter, r *http.Request, id stri
 }
 
 func (a *API) getTarget(w http.ResponseWriter, r *http.Request, id string) {
+	a.mu.RLock()
+	var found *config.Target
 	for _, t := range a.cfg.Targets {
 		if t.ID == id {
-			latest := a.store.GetLatestResult(id)
-			writeJSON(w, http.StatusOK, map[string]interface{}{
-				"target":       t,
-				"latest_probe": latest,
-			})
-			return
+			found = &t
+			break
 		}
 	}
-	writeJSON(w, http.StatusNotFound, map[string]string{"error": "target not found"})
+	a.mu.RUnlock()
+
+	if found == nil {
+		writeJSON(w, http.StatusNotFound, map[string]string{"error": "target not found"})
+		return
+	}
+	latest := a.store.GetLatestResult(id)
+	writeJSON(w, http.StatusOK, map[string]interface{}{
+		"target":       found,
+		"latest_probe": latest,
+	})
 }
 
 func (a *API) handleTargetHistory(w http.ResponseWriter, r *http.Request, id string) {
