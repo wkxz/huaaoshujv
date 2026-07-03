@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"encoding/json"
@@ -8,34 +8,41 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"http-monitor/internal/bench"
+	"http-monitor/internal/config"
+	"http-monitor/internal/monitor"
+	"http-monitor/internal/store"
 )
 
 const maxBenchTasks = 100
 
 type API struct {
-	store      *Store
-	scheduler  *Scheduler
-	cfg        *Config
+	store      *store.Store
+	scheduler  *monitor.Scheduler
+	cfg        *config.Config
+	cfgPath    string
 	mu         sync.Mutex
 	benchTasks map[string]*BenchTask
 	benchMu    sync.Mutex
 }
 
 type BenchTask struct {
-	ID        string       `json:"id"`
-	Config    BenchConfig  `json:"config"`
-	Status    string       `json:"status"`
-	Report    *BenchReport `json:"report,omitempty"`
-	StartedAt time.Time   `json:"started_at"`
-	EndedAt   *time.Time  `json:"ended_at,omitempty"`
-	Error     string       `json:"error,omitempty"`
+	ID        string             `json:"id"`
+	Config    bench.BenchConfig  `json:"config"`
+	Status    string             `json:"status"`
+	Report    *bench.BenchReport `json:"report,omitempty"`
+	StartedAt time.Time          `json:"started_at"`
+	EndedAt   *time.Time         `json:"ended_at,omitempty"`
+	Error     string             `json:"error,omitempty"`
 }
 
-func NewAPI(store *Store, scheduler *Scheduler, cfg *Config) *API {
+func NewAPI(s *store.Store, scheduler *monitor.Scheduler, cfg *config.Config, cfgPath string) *API {
 	return &API{
-		store:      store,
+		store:      s,
 		scheduler:  scheduler,
 		cfg:        cfg,
+		cfgPath:    cfgPath,
 		benchTasks: make(map[string]*BenchTask),
 	}
 }
@@ -64,8 +71,8 @@ func (a *API) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]interface{}{
-		"total":    total,
-		"healthy":  healthy,
+		"total":     total,
+		"healthy":   healthy,
 		"unhealthy": total - healthy,
 	})
 }
@@ -85,8 +92,8 @@ func (a *API) listTargets(w http.ResponseWriter, r *http.Request) {
 	latest := a.store.GetAllLatest()
 
 	type TargetStatus struct {
-		Target
-		Latest *ProbeResult `json:"latest_probe"`
+		config.Target
+		Latest *config.ProbeResult `json:"latest_probe"`
 	}
 
 	var result []TargetStatus
@@ -157,7 +164,7 @@ func (a *API) handleTargetHistory(w http.ResponseWriter, r *http.Request, id str
 }
 
 func (a *API) addTarget(w http.ResponseWriter, r *http.Request) {
-	var t Target
+	var t config.Target
 	if err := json.NewDecoder(r.Body).Decode(&t); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
@@ -188,14 +195,14 @@ func (a *API) addTarget(w http.ResponseWriter, r *http.Request) {
 	}
 
 	a.cfg.Targets = append(a.cfg.Targets, t)
-	SaveConfig("config.json", a.cfg)
+	config.SaveConfig(a.cfgPath, a.cfg)
 	a.scheduler.AddTarget(t)
 
 	writeJSON(w, http.StatusCreated, t)
 }
 
 func (a *API) updateTarget(w http.ResponseWriter, r *http.Request, id string) {
-	var update Target
+	var update config.Target
 	if err := json.NewDecoder(r.Body).Decode(&update); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
@@ -223,7 +230,7 @@ func (a *API) updateTarget(w http.ResponseWriter, r *http.Request, id string) {
 				update.TimeoutSeconds = t.TimeoutSeconds
 			}
 			a.cfg.Targets[i] = update
-			SaveConfig("config.json", a.cfg)
+			config.SaveConfig(a.cfgPath, a.cfg)
 			a.scheduler.AddTarget(update)
 			writeJSON(w, http.StatusOK, update)
 			return
@@ -239,7 +246,7 @@ func (a *API) deleteTarget(w http.ResponseWriter, r *http.Request, id string) {
 	for i, t := range a.cfg.Targets {
 		if t.ID == id {
 			a.cfg.Targets = append(a.cfg.Targets[:i], a.cfg.Targets[i+1:]...)
-			SaveConfig("config.json", a.cfg)
+			config.SaveConfig(a.cfgPath, a.cfg)
 			a.scheduler.RemoveTarget(id)
 			writeJSON(w, http.StatusOK, map[string]string{"message": "deleted"})
 			return
@@ -274,7 +281,7 @@ func (a *API) listBenchTasks(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *API) createBenchTask(w http.ResponseWriter, r *http.Request) {
-	var cfg BenchConfig
+	var cfg bench.BenchConfig
 	if err := json.NewDecoder(r.Body).Decode(&cfg); err != nil {
 		writeJSON(w, http.StatusBadRequest, map[string]string{"error": "invalid json"})
 		return
@@ -317,10 +324,10 @@ func (a *API) createBenchTask(w http.ResponseWriter, r *http.Request) {
 
 	go func() {
 		start := time.Now()
-		records := RunBench(cfg)
+		records := bench.RunBench(cfg)
 		duration := time.Since(start)
 
-		report := CalcReport(records, duration)
+		report := bench.CalcReport(records, duration)
 		now := time.Now()
 
 		a.benchMu.Lock()
@@ -353,7 +360,6 @@ func (a *API) handleBenchByID(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, task)
 }
 
-// evictOldestBenchTask removes the oldest completed task; caller holds benchMu
 func (a *API) evictOldestBenchTask() {
 	var oldestID string
 	var oldestTime time.Time

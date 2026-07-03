@@ -10,10 +10,17 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"http-monitor/internal/alert"
+	"http-monitor/internal/api"
+	"http-monitor/internal/config"
+	"http-monitor/internal/monitor"
+	"http-monitor/internal/store"
 )
 
 func main() {
-	cfg, err := LoadConfig("config.json")
+	cfgPath := "config.json"
+	cfg, err := config.LoadConfig(cfgPath)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
@@ -22,7 +29,7 @@ func main() {
 		fmt.Printf("  - [%s] %s (%s %s, 间隔%ds)\n", t.ID, t.Name, t.Method, t.URL, t.IntervalSeconds)
 	}
 
-	store := NewStore("data.json")
+	s := store.NewStore("data.json")
 
 	threshold := cfg.Alert.Threshold
 	if threshold <= 0 {
@@ -32,15 +39,15 @@ func main() {
 	if cooldown <= 0 {
 		cooldown = 5
 	}
-	alertMgr := NewAlertManager(cfg.Alert.WebhookURL, threshold, cooldown)
+	alertMgr := alert.NewAlertManager(cfg.Alert.WebhookURL, threshold, cooldown)
 
-	scheduler := NewScheduler(store, alertMgr)
+	scheduler := monitor.NewScheduler(s, alertMgr)
 	scheduler.Start(cfg.Targets)
 
 	mux := http.NewServeMux()
 
-	api := NewAPI(store, scheduler, cfg)
-	api.RegisterRoutes(mux)
+	a := api.NewAPI(s, scheduler, cfg, cfgPath)
+	a.RegisterRoutes(mux)
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
@@ -67,7 +74,7 @@ func main() {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	server.Shutdown(ctx)
-	store.ForceSync()
+	s.ForceSync()
 	fmt.Println("服务已关闭")
 }
 

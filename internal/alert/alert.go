@@ -1,4 +1,4 @@
-package main
+package alert
 
 import (
 	"bytes"
@@ -7,16 +7,18 @@ import (
 	"net/http"
 	"sync"
 	"time"
+
+	"http-monitor/internal/config"
 )
 
 type AlertManager struct {
-	webhookURL    string
-	threshold     int
-	cooldown      time.Duration
-	failCounts    map[string]int
-	alertedAt     map[string]time.Time
-	wasDown       map[string]bool
-	mu            sync.Mutex
+	webhookURL string
+	threshold  int
+	cooldown   time.Duration
+	failCounts map[string]int
+	alertedAt  map[string]time.Time
+	wasDown    map[string]bool
+	mu         sync.Mutex
 }
 
 func NewAlertManager(webhookURL string, threshold int, cooldownMinutes int) *AlertManager {
@@ -30,7 +32,7 @@ func NewAlertManager(webhookURL string, threshold int, cooldownMinutes int) *Ale
 	}
 }
 
-func (am *AlertManager) Check(result ProbeResult) {
+func (am *AlertManager) Check(result config.ProbeResult) {
 	am.mu.Lock()
 	defer am.mu.Unlock()
 
@@ -63,7 +65,7 @@ type WebhookPayload struct {
 	Details   string `json:"details,omitempty"`
 }
 
-func (am *AlertManager) sendAlert(result ProbeResult) {
+func (am *AlertManager) sendAlert(result config.ProbeResult) {
 	payload := WebhookPayload{
 		Type:      "alert",
 		TargetID:  result.TargetID,
@@ -75,7 +77,7 @@ func (am *AlertManager) sendAlert(result ProbeResult) {
 	fmt.Printf("[ALERT] %s 连续 %d 次失败，已触发告警\n", result.TargetID, am.threshold)
 }
 
-func (am *AlertManager) sendRecovery(result ProbeResult) {
+func (am *AlertManager) sendRecovery(result config.ProbeResult) {
 	payload := WebhookPayload{
 		Type:      "recovery",
 		TargetID:  result.TargetID,

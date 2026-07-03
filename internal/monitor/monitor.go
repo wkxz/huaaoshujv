@@ -1,23 +1,18 @@
-package main
+package monitor
 
 import (
 	"fmt"
 	"net/http"
 	"sync"
 	"time"
+
+	"http-monitor/internal/alert"
+	"http-monitor/internal/config"
+	"http-monitor/internal/store"
 )
 
-type ProbeResult struct {
-	TargetID   string    `json:"target_id"`
-	StatusCode int       `json:"status_code"`
-	LatencyMs  int64     `json:"latency_ms"`
-	Success    bool      `json:"success"`
-	Error      string    `json:"error,omitempty"`
-	CheckedAt  time.Time `json:"checked_at"`
-}
-
-func Probe(target Target) ProbeResult {
-	result := ProbeResult{
+func Probe(target config.Target) config.ProbeResult {
+	result := config.ProbeResult{
 		TargetID:  target.ID,
 		CheckedAt: time.Now(),
 	}
@@ -51,32 +46,32 @@ func Probe(target Target) ProbeResult {
 }
 
 type Scheduler struct {
-	targets  map[string]Target
+	targets  map[string]config.Target
 	stopChs  map[string]chan struct{}
-	resultCh chan ProbeResult
-	store    *Store
-	alertMgr *AlertManager
+	resultCh chan config.ProbeResult
+	store    *store.Store
+	alertMgr *alert.AlertManager
 	mu       sync.Mutex
 }
 
-func NewScheduler(store *Store, alertMgr *AlertManager) *Scheduler {
+func NewScheduler(s *store.Store, am *alert.AlertManager) *Scheduler {
 	return &Scheduler{
-		targets:  make(map[string]Target),
+		targets:  make(map[string]config.Target),
 		stopChs:  make(map[string]chan struct{}),
-		resultCh: make(chan ProbeResult, 100),
-		store:    store,
-		alertMgr: alertMgr,
+		resultCh: make(chan config.ProbeResult, 100),
+		store:    s,
+		alertMgr: am,
 	}
 }
 
-func (s *Scheduler) Start(targets []Target) {
+func (s *Scheduler) Start(targets []config.Target) {
 	for _, t := range targets {
 		s.AddTarget(t)
 	}
 	go s.processResults()
 }
 
-func (s *Scheduler) AddTarget(t Target) {
+func (s *Scheduler) AddTarget(t config.Target) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -102,7 +97,7 @@ func (s *Scheduler) RemoveTarget(id string) {
 	}
 }
 
-func (s *Scheduler) runProbe(t Target, stopCh chan struct{}) {
+func (s *Scheduler) runProbe(t config.Target, stopCh chan struct{}) {
 	s.resultCh <- Probe(t)
 
 	ticker := time.NewTicker(time.Duration(t.IntervalSeconds) * time.Second)

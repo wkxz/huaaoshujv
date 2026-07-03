@@ -1,9 +1,10 @@
-package main
+package config
 
 import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"time"
 )
 
 type Target struct {
@@ -17,14 +18,23 @@ type Target struct {
 }
 
 type Config struct {
-	Targets         []Target    `json:"targets"`
-	Alert           AlertConfig `json:"alert"`
+	Targets []Target    `json:"targets"`
+	Alert   AlertConfig `json:"alert"`
 }
 
 type AlertConfig struct {
 	WebhookURL      string `json:"webhook_url"`
 	Threshold       int    `json:"threshold"`
 	CooldownMinutes int    `json:"cooldown_minutes"`
+}
+
+type ProbeResult struct {
+	TargetID   string    `json:"target_id"`
+	StatusCode int       `json:"status_code"`
+	LatencyMs  int64     `json:"latency_ms"`
+	Success    bool      `json:"success"`
+	Error      string    `json:"error,omitempty"`
+	CheckedAt  time.Time `json:"checked_at"`
 }
 
 func LoadConfig(path string) (*Config, error) {

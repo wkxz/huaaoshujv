@@ -1,24 +1,26 @@
-package main
+package store
 
 import (
 	"encoding/json"
 	"os"
 	"sync"
 	"time"
+
+	"http-monitor/internal/config"
 )
 
 const maxResultsPerTarget = 100
 
 type Store struct {
 	mu      sync.RWMutex
-	results map[string][]ProbeResult
+	results map[string][]config.ProbeResult
 	path    string
 	saveCh  chan struct{}
 }
 
 func NewStore(path string) *Store {
 	s := &Store{
-		results: make(map[string][]ProbeResult),
+		results: make(map[string][]config.ProbeResult),
 		path:    path,
 		saveCh:  make(chan struct{}, 1),
 	}
@@ -27,7 +29,7 @@ func NewStore(path string) *Store {
 	return s
 }
 
-func (s *Store) SaveResult(r ProbeResult) {
+func (s *Store) SaveResult(r config.ProbeResult) {
 	s.mu.Lock()
 	s.results[r.TargetID] = append(s.results[r.TargetID], r)
 	if len(s.results[r.TargetID]) > maxResultsPerTarget {
@@ -35,18 +37,15 @@ func (s *Store) SaveResult(r ProbeResult) {
 	}
 	s.mu.Unlock()
 
-	// non-blocking signal to persist loop
 	select {
 	case s.saveCh <- struct{}{}:
 	default:
 	}
 }
 
-// persistLoop debounces writes: waits 2s after last signal before flushing
 func (s *Store) persistLoop() {
 	for range s.saveCh {
 		time.Sleep(2 * time.Second)
-		// drain any queued signals
 		for {
 			select {
 			case <-s.saveCh:
@@ -59,17 +58,17 @@ func (s *Store) persistLoop() {
 	}
 }
 
-func (s *Store) GetResults(targetID string) []ProbeResult {
+func (s *Store) GetResults(targetID string) []config.ProbeResult {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
 	results := s.results[targetID]
-	copied := make([]ProbeResult, len(results))
+	copied := make([]config.ProbeResult, len(results))
 	copy(copied, results)
 	return copied
 }
 
-func (s *Store) GetLatestResult(targetID string) *ProbeResult {
+func (s *Store) GetLatestResult(targetID string) *config.ProbeResult {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
@@ -81,11 +80,11 @@ func (s *Store) GetLatestResult(targetID string) *ProbeResult {
 	return &r
 }
 
-func (s *Store) GetAllLatest() map[string]*ProbeResult {
+func (s *Store) GetAllLatest() map[string]*config.ProbeResult {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 
-	latest := make(map[string]*ProbeResult)
+	latest := make(map[string]*config.ProbeResult)
 	for id, results := range s.results {
 		if len(results) > 0 {
 			r := results[len(results)-1]
@@ -103,7 +102,6 @@ func (s *Store) persist() {
 	if err != nil {
 		return
 	}
-	// write to temp file then rename for atomicity
 	tmp := s.path + ".tmp"
 	if err := os.WriteFile(tmp, data, 0644); err != nil {
 		return
